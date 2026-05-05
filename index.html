@@ -56,12 +56,7 @@
         <div class="bg-white rounded-lg shadow p-4 space-y-3">
           <div class="flex flex-wrap items-center gap-3">
             <span class="text-sm font-medium text-gray-700 w-20">เดือน:</span>
-            <div id="monthFilter" class="flex flex-wrap gap-1">
-              <button class="month-tab px-3 py-1.5 text-sm rounded-md border" data-month="all">ทั้งหมด</button>
-              <button class="month-tab px-3 py-1.5 text-sm rounded-md border" data-month="Apr">เม.ย.</button>
-              <button class="month-tab px-3 py-1.5 text-sm rounded-md border" data-month="May">พ.ค.</button>
-              <button class="month-tab px-3 py-1.5 text-sm rounded-md border" data-month="Jun">มิ.ย.</button>
-            </div>
+            <div id="monthFilter" class="flex flex-wrap gap-1"></div>
           </div>
           <div class="flex flex-wrap items-center gap-3">
             <span class="text-sm font-medium text-gray-700 w-20">หมวด:</span>
@@ -116,27 +111,45 @@
 <script>
 const fmt = n => new Intl.NumberFormat('th-TH', { maximumFractionDigits: 0 }).format(n);
 
-// Section ranges in the Master plan sheet (1-indexed Excel rows)
-const SECTIONS = [
-  { name: 'Event Part',     startRow: 8,  endRow: 13, mediaFromCol: 3 }, // C
-  { name: 'Manifesto Part', startRow: 15, endRow: 16, mediaFromCol: 3 },
-  { name: 'HTT',            startRow: 18, endRow: 23, mediaFromCol: 3 },
-  { name: 'Detergent',      startRow: 25, endRow: 30, mediaFromCol: 3 },
-  { name: 'Influencer',     startRow: 32, endRow: 49, mediaFromCol: 4 }, // D
-];
+// Detected dynamically from each uploaded file
+let SECTIONS = [];
+let MONTHS = [];
 
-const MONTHS = [
-  { code: 'Apr', name: 'เม.ย.', col: 10 }, // J
-  { code: 'May', name: 'พ.ค.',  col: 11 }, // K
-  { code: 'Jun', name: 'มิ.ย.', col: 12 }, // L
-];
+const ENG_MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const TH_MONTH = { Jan:'ม.ค.', Feb:'ก.พ.', Mar:'มี.ค.', Apr:'เม.ย.', May:'พ.ค.', Jun:'มิ.ย.', Jul:'ก.ค.', Aug:'ส.ค.', Sep:'ก.ย.', Oct:'ต.ค.', Nov:'พ.ย.', Dec:'ธ.ค.' };
+const SUMMARY_PATTERN = /budget|fee|total|grand|รวม|งบ\s*โฆษณา|management/i;
 
 function detectMedia(text) {
   const s = String(text || '');
   if (/facebook/i.test(s)) return 'Facebook';
   if (/youtube/i.test(s)) return 'YouTube';
   if (/tiktok/i.test(s))  return 'TikTok';
+  if (/instagram/i.test(s)) return 'Instagram';
+  if (/line/i.test(s))    return 'LINE';
+  if (/google/i.test(s))  return 'Google';
+  if (/twitter|x\.com/i.test(s)) return 'X';
   return '-';
+}
+
+// Color palette assigned by section discovery order
+const COLOR_PALETTE = [
+  { accent: 'border-amber-400',   badge: 'bg-amber-100 text-amber-800' },
+  { accent: 'border-purple-400',  badge: 'bg-purple-100 text-purple-800' },
+  { accent: 'border-emerald-400', badge: 'bg-emerald-100 text-emerald-800' },
+  { accent: 'border-sky-400',     badge: 'bg-sky-100 text-sky-800' },
+  { accent: 'border-pink-400',    badge: 'bg-pink-100 text-pink-800' },
+  { accent: 'border-indigo-400',  badge: 'bg-indigo-100 text-indigo-800' },
+  { accent: 'border-orange-400',  badge: 'bg-orange-100 text-orange-800' },
+  { accent: 'border-teal-400',    badge: 'bg-teal-100 text-teal-800' },
+  { accent: 'border-rose-400',    badge: 'bg-rose-100 text-rose-800' },
+  { accent: 'border-lime-400',    badge: 'bg-lime-100 text-lime-800' },
+];
+const sectionColorMap = new Map();
+function colorFor(name) {
+  if (!sectionColorMap.has(name)) {
+    sectionColorMap.set(name, COLOR_PALETTE[sectionColorMap.size % COLOR_PALETTE.length]);
+  }
+  return sectionColorMap.get(name);
 }
 
 function parseExcel(arrayBuffer) {
@@ -166,18 +179,68 @@ function parseExcel(arrayBuffer) {
     }
   }
   const get = (r, c) => cells[`${r},${c}`];
+  const maxRow = range.e.r + 1;
+  const maxCol = range.e.c + 1;
 
+  // 1) Find header row by locating month labels (Apr, May, Jun, etc.)
+  let headerRow = -1;
+  let monthCols = [];
+  for (let r = 1; r <= Math.min(25, maxRow); r++) {
+    const found = [];
+    for (let c = 1; c <= maxCol; c++) {
+      const v = String(get(r, c) || '').trim();
+      const lc = v.toLowerCase();
+      const m = ENG_MONTHS.find(eng => lc === eng.toLowerCase() || lc.startsWith(eng.toLowerCase()));
+      if (m) found.push({ code: m, name: TH_MONTH[m], col: c });
+    }
+    if (found.length >= 2) { headerRow = r; monthCols = found; break; }
+  }
+  if (headerRow < 0) throw new Error('ไม่พบแถว header (ต้องมีชื่อเดือนเช่น Apr, May)');
+
+  // 2) Find Period column from header text
+  let periodCol = 0;
+  for (let c = 1; c <= maxCol; c++) {
+    const v = String(get(headerRow, c) || '').toLowerCase();
+    if (v === 'period' || v.includes('ระยะเวลา') || v.includes('date')) { periodCol = c; break; }
+  }
+  if (!periodCol) periodCol = (monthCols[0]?.col || 10) - 1; // fallback: col before first month
+
+  // 3) Detect sections by scanning column B below header.
+  //    Section header  = B has value, C is empty.
+  //    Data row        = C has value (B may be merged from above or empty).
+  //    Stop            = B contains keywords like budget/fee/total/รวม.
+  const sections = [];
+  let current = null;
+  for (let r = headerRow + 1; r <= maxRow; r++) {
+    const bStr = String(get(r, 2) || '').trim();
+    const cStr = String(get(r, 3) || '').trim();
+
+    if (bStr && !cStr && SUMMARY_PATTERN.test(bStr)) break;
+    if (!bStr && !cStr) continue;
+
+    if (bStr && !cStr) {
+      if (current && current.endRow >= current.startRow) sections.push(current);
+      current = { name: bStr, startRow: r + 1, endRow: -1 };
+      continue;
+    }
+    if (current && cStr) current.endRow = r;
+  }
+  if (current && current.endRow >= current.startRow) sections.push(current);
+
+  // 4) Extract data rows
   const rows = [];
-  for (const sec of SECTIONS) {
+  for (const sec of sections) {
     for (let r = sec.startRow; r <= sec.endRow; r++) {
       const material  = get(r, 2); // B
       const subDetail = get(r, 3); // C
       const detail    = get(r, 4); // D
-      const period    = get(r, 9); // I
-      const media = detectMedia(get(r, sec.mediaFromCol));
+      const period    = get(r, periodCol);
+      // Detect media from C, fallback to D
+      let media = detectMedia(get(r, 3));
+      if (media === '-') media = detectMedia(get(r, 4));
       const matDisplay = [material, subDetail].filter(Boolean).join(' — ');
 
-      for (const m of MONTHS) {
+      for (const m of monthCols) {
         const cost = Number(get(r, m.col)) || 0;
         if (cost > 0) {
           rows.push({
@@ -194,7 +257,8 @@ function parseExcel(arrayBuffer) {
       }
     }
   }
-  return { sheetName, rows };
+
+  return { sheetName, rows, sections, months: monthCols };
 }
 
 let DATA = [];
@@ -221,11 +285,31 @@ function renderMonthCards() {
   const total = document.createElement('div');
   total.className = 'bg-blue-600 text-white rounded-lg shadow p-4';
   total.innerHTML = `
-    <div class="text-sm text-blue-100">รวม 3 เดือน</div>
+    <div class="text-sm text-blue-100">รวม ${MONTHS.length} เดือน</div>
     <div class="text-2xl font-bold mt-1">${fmt(grandTotal)} <span class="text-base font-normal text-blue-100">บาท</span></div>
     <div class="text-xs text-blue-200 mt-1">${DATA.length} บรรทัด</div>
   `;
   container.appendChild(total);
+}
+
+function renderMonthFilter() {
+  const container = document.getElementById('monthFilter');
+  container.innerHTML = '';
+  const all = document.createElement('button');
+  all.className = 'month-tab px-3 py-1.5 text-sm rounded-md border';
+  all.dataset.month = 'all';
+  all.textContent = 'ทั้งหมด';
+  container.appendChild(all);
+  for (const m of MONTHS) {
+    const btn = document.createElement('button');
+    btn.className = 'month-tab px-3 py-1.5 text-sm rounded-md border';
+    btn.dataset.month = m.code;
+    btn.textContent = m.name;
+    container.appendChild(btn);
+  }
+  container.querySelectorAll('.month-tab').forEach(btn => {
+    btn.addEventListener('click', () => { activeMonth = btn.dataset.month; renderRows(); });
+  });
 }
 
 function renderSectionCards() {
@@ -331,49 +415,52 @@ function mediaColor(m) {
   }
 }
 
-function sectionAccent(name) {
-  switch (name) {
-    case 'Event Part':     return 'border-l-4 border-amber-400';
-    case 'Manifesto Part': return 'border-l-4 border-purple-400';
-    case 'HTT':            return 'border-l-4 border-emerald-400';
-    case 'Detergent':      return 'border-l-4 border-sky-400';
-    case 'Influencer':     return 'border-l-4 border-pink-400';
-    default:               return 'border-l-4 border-gray-300';
-  }
-}
-
-function sectionBadge(name) {
-  switch (name) {
-    case 'Event Part':     return 'bg-amber-100 text-amber-800';
-    case 'Manifesto Part': return 'bg-purple-100 text-purple-800';
-    case 'HTT':            return 'bg-emerald-100 text-emerald-800';
-    case 'Detergent':      return 'bg-sky-100 text-sky-800';
-    case 'Influencer':     return 'bg-pink-100 text-pink-800';
-    default:               return 'bg-gray-100 text-gray-700';
-  }
-}
+function sectionAccent(name) { return 'border-l-4 ' + colorFor(name).accent; }
+function sectionBadge(name)  { return colorFor(name).badge; }
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
 }
 
+function resetState() {
+  DATA = [];
+  SECTIONS = [];
+  MONTHS = [];
+  activeMonth = 'all';
+  activeSection = 'all';
+  sectionColorMap.clear();
+  ['monthCards','sectionCards','monthFilter','sectionFilter','rowsBody','byMediaBody'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = '';
+  });
+  const total = document.getElementById('rowsTotal');
+  if (total) total.textContent = '';
+  const fs = document.getElementById('filterSummary');
+  if (fs) fs.textContent = '';
+}
+
 async function handleFile(file) {
   const status = document.getElementById('status');
-  status.textContent = 'กำลังอ่านไฟล์...';
+  resetState();
+  status.textContent = `กำลังอ่านไฟล์ "${file.name}"...`;
   status.className = 'mt-4 text-sm text-gray-600';
   try {
     const buf = await file.arrayBuffer();
-    const { sheetName, rows } = parseExcel(buf);
+    const { sheetName, rows, sections, months } = parseExcel(buf);
     DATA = rows;
-    status.textContent = `อ่านสำเร็จ: Sheet "${sheetName}" — พบ ${rows.length} บรรทัด`;
+    SECTIONS = sections;
+    MONTHS = months;
+    status.innerHTML = `อ่านสำเร็จ: Sheet "<b>${escapeHtml(sheetName)}</b>" — พบ <b>${sections.length}</b> หมวด, <b>${months.length}</b> เดือน (${months.map(m => m.name).join(', ')}), <b>${rows.length}</b> บรรทัด`;
     status.className = 'mt-4 text-sm text-green-700';
     document.getElementById('result').classList.remove('hidden');
     renderMonthCards();
+    renderMonthFilter();
     renderSectionCards();
     renderSectionFilter();
     renderRows();
   } catch (e) {
     console.error(e);
+    document.getElementById('result').classList.add('hidden');
     status.textContent = 'อ่านไฟล์ไม่สำเร็จ: ' + e.message;
     status.className = 'mt-4 text-sm text-red-700';
   }
@@ -388,10 +475,8 @@ fileInput.addEventListener('change', e => e.target.files[0] && handleFile(e.targ
 ['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove('dragover'); }));
 dropZone.addEventListener('drop', e => { e.preventDefault(); e.dataTransfer.files[0] && handleFile(e.dataTransfer.files[0]); });
 
-document.querySelectorAll('.month-tab').forEach(btn => {
-  btn.addEventListener('click', () => { activeMonth = btn.dataset.month; renderRows(); });
-});
-updateFilterStyles();
+// Month tabs and section chips are wired up dynamically after each upload
+// (renderMonthFilter / renderSectionFilter)
 </script>
 </body>
 </html>
