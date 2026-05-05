@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Master Plan → Monthly Plan</title>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Sukhumvit Set", "Noto Sans Thai", sans-serif; }
+  .drop-zone.dragover { background-color: #eff6ff; border-color: #3b82f6; }
+  td.detail { max-width: 380px; white-space: pre-wrap; font-size: 0.8rem; color: #4b5563; }
+</style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+<div class="max-w-7xl mx-auto p-6">
+  <header class="mb-6">
+    <h1 class="text-2xl font-bold">Master Plan → Monthly Plan</h1>
+    <p class="text-gray-600 text-sm mt-1">อัพโหลดไฟล์ Master Plan (.xlsx) → ระบบจะดึงข้อมูลจาก Sheet แรก แล้วสรุปการใช้งบรายเดือน</p>
+  </header>
+
+  <!-- Upload zone -->
+  <div id="dropZone" class="drop-zone border-2 border-dashed border-gray-300 rounded-lg p-8 text-center bg-white cursor-pointer hover:border-blue-400 transition">
+    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 16a4 4 0 01-.88-7.9A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+    </svg>
+    <p class="mt-3 text-sm text-gray-600">ลากไฟล์ Excel มาวางที่นี่ หรือ <span class="text-blue-600 font-medium">คลิกเพื่อเลือกไฟล์</span></p>
+    <p class="text-xs text-gray-400 mt-1">รองรับ .xlsx, .xls (Sheet แรกเท่านั้น)</p>
+    <input id="fileInput" type="file" accept=".xlsx,.xls" class="hidden" />
+  </div>
+
+  <div id="status" class="mt-4 text-sm"></div>
+
+  <!-- Result area -->
+  <div id="result" class="hidden mt-8 space-y-8">
+
+    <!-- Summary cards -->
+    <section>
+      <h2 class="text-lg font-semibold mb-3">สรุปงบรายเดือน</h2>
+      <div id="monthCards" class="grid grid-cols-1 md:grid-cols-3 gap-4"></div>
+    </section>
+
+    <!-- Month tabs -->
+    <section>
+      <div class="flex items-center gap-2 mb-3 border-b">
+        <h2 class="text-lg font-semibold mr-4">รายละเอียดรายบรรทัด</h2>
+        <button class="month-tab px-4 py-2 text-sm font-medium" data-month="all">ทั้งหมด</button>
+        <button class="month-tab px-4 py-2 text-sm font-medium" data-month="Apr">เม.ย.</button>
+        <button class="month-tab px-4 py-2 text-sm font-medium" data-month="May">พ.ค.</button>
+        <button class="month-tab px-4 py-2 text-sm font-medium" data-month="Jun">มิ.ย.</button>
+      </div>
+      <div class="overflow-x-auto bg-white rounded-lg shadow">
+        <table class="min-w-full text-sm">
+          <thead class="bg-gray-100">
+            <tr>
+              <th class="px-3 py-2 text-left">Media</th>
+              <th class="px-3 py-2 text-left">Material</th>
+              <th class="px-3 py-2 text-left">Detail (Audience / Interest)</th>
+              <th class="px-3 py-2 text-left">Date</th>
+              <th class="px-3 py-2 text-right">Cost / Month (THB)</th>
+            </tr>
+          </thead>
+          <tbody id="rowsBody"></tbody>
+          <tfoot class="bg-gray-50 font-semibold">
+            <tr>
+              <td colspan="4" class="px-3 py-2 text-right">รวม</td>
+              <td id="rowsTotal" class="px-3 py-2 text-right"></td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </section>
+
+    <!-- Aggregations for selected month -->
+    <section class="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-3">สรุปตาม Media</h3>
+        <table class="w-full text-sm">
+          <thead><tr class="border-b text-left"><th class="py-1">Media</th><th class="text-right">งบ (THB)</th><th class="text-right">%</th></tr></thead>
+          <tbody id="byMediaBody"></tbody>
+        </table>
+      </div>
+      <div class="bg-white rounded-lg shadow p-4">
+        <h3 class="font-semibold mb-3">สรุปตามหมวด</h3>
+        <table class="w-full text-sm">
+          <thead><tr class="border-b text-left"><th class="py-1">หมวด</th><th class="text-right">งบ (THB)</th><th class="text-right">%</th></tr></thead>
+          <tbody id="bySectionBody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+</div>
+
+<script>
+const fmt = n => new Intl.NumberFormat('th-TH', { maximumFractionDigits: 0 }).format(n);
+
+// Section ranges in the Master plan sheet (1-indexed Excel rows)
+const SECTIONS = [
+  { name: 'Event Part',     startRow: 8,  endRow: 13, mediaFromCol: 3 }, // C
+  { name: 'Manifesto Part', startRow: 15, endRow: 16, mediaFromCol: 3 },
+  { name: 'HTT',            startRow: 18, endRow: 23, mediaFromCol: 3 },
+  { name: 'Detergent',      startRow: 25, endRow: 30, mediaFromCol: 3 },
+  { name: 'Influencer',     startRow: 32, endRow: 49, mediaFromCol: 4 }, // D
+];
+
+const MONTHS = [
+  { code: 'Apr', name: 'เม.ย.', col: 10 }, // J
+  { code: 'May', name: 'พ.ค.',  col: 11 }, // K
+  { code: 'Jun', name: 'มิ.ย.', col: 12 }, // L
+];
+
+function detectMedia(text) {
+  const s = String(text || '');
+  if (/facebook/i.test(s)) return 'Facebook';
+  if (/youtube/i.test(s)) return 'YouTube';
+  if (/tiktok/i.test(s))  return 'TikTok';
+  return '-';
+}
+
+function parseExcel(arrayBuffer) {
+  const wb = XLSX.read(arrayBuffer, { type: 'array' });
+  const sheetName = wb.SheetNames[0];
+  const ws = wb.Sheets[sheetName];
+
+  const cells = {};
+  const range = XLSX.utils.decode_range(ws['!ref']);
+  for (let R = range.s.r; R <= range.e.r; R++) {
+    for (let C = range.s.c; C <= range.e.c; C++) {
+      const cell = ws[XLSX.utils.encode_cell({ r: R, c: C })];
+      if (cell && cell.v !== undefined && cell.v !== null) {
+        cells[`${R+1},${C+1}`] = cell.v;
+      }
+    }
+  }
+  // Fill merged cells with their top-left value
+  for (const m of (ws['!merges'] || [])) {
+    const top = ws[XLSX.utils.encode_cell({ r: m.s.r, c: m.s.c })];
+    if (!top) continue;
+    for (let R = m.s.r; R <= m.e.r; R++) {
+      for (let C = m.s.c; C <= m.e.c; C++) {
+        const k = `${R+1},${C+1}`;
+        if (cells[k] === undefined) cells[k] = top.v;
+      }
+    }
+  }
+  const get = (r, c) => cells[`${r},${c}`];
+
+  const rows = [];
+  for (const sec of SECTIONS) {
+    for (let r = sec.startRow; r <= sec.endRow; r++) {
+      const material  = get(r, 2); // B
+      const subDetail = get(r, 3); // C
+      const detail    = get(r, 4); // D
+      const period    = get(r, 9); // I
+      const media = detectMedia(get(r, sec.mediaFromCol));
+      const matDisplay = [material, subDetail].filter(Boolean).join(' — ');
+
+      for (const m of MONTHS) {
+        const cost = Number(get(r, m.col)) || 0;
+        if (cost > 0) {
+          rows.push({
+            section: sec.name,
+            media,
+            material: matDisplay || '(ไม่มีข้อมูล)',
+            detail: detail || '',
+            date: m.name,
+            dateCode: m.code,
+            period: period || '',
+            cost,
+          });
+        }
+      }
+    }
+  }
+  return { sheetName, rows };
+}
+
+let DATA = [];
+let activeMonth = 'Apr';
+
+function renderMonthCards() {
+  const container = document.getElementById('monthCards');
+  container.innerHTML = '';
+  for (const m of MONTHS) {
+    const total = DATA.filter(r => r.dateCode === m.code).reduce((s, r) => s + r.cost, 0);
+    const count = DATA.filter(r => r.dateCode === m.code).length;
+    const card = document.createElement('div');
+    card.className = 'bg-white rounded-lg shadow p-4';
+    card.innerHTML = `
+      <div class="text-sm text-gray-500">${m.name}</div>
+      <div class="text-2xl font-bold mt-1">${fmt(total)} <span class="text-base font-normal text-gray-500">บาท</span></div>
+      <div class="text-xs text-gray-400 mt-1">${count} บรรทัด</div>
+    `;
+    container.appendChild(card);
+  }
+}
+
+function renderRows() {
+  const tbody = document.getElementById('rowsBody');
+  tbody.innerHTML = '';
+  const filtered = activeMonth === 'all' ? DATA : DATA.filter(r => r.dateCode === activeMonth);
+
+  for (const r of filtered) {
+    const tr = document.createElement('tr');
+    tr.className = 'border-b hover:bg-gray-50';
+    tr.innerHTML = `
+      <td class="px-3 py-2 align-top whitespace-nowrap"><span class="inline-block px-2 py-0.5 rounded text-xs ${mediaColor(r.media)}">${r.media}</span></td>
+      <td class="px-3 py-2 align-top">${escapeHtml(r.material)}</td>
+      <td class="px-3 py-2 align-top detail">${escapeHtml(r.detail)}</td>
+      <td class="px-3 py-2 align-top whitespace-nowrap">${r.date}<div class="text-xs text-gray-400">${escapeHtml(r.period)}</div></td>
+      <td class="px-3 py-2 align-top text-right whitespace-nowrap">${fmt(r.cost)}</td>
+    `;
+    tbody.appendChild(tr);
+  }
+  const total = filtered.reduce((s, r) => s + r.cost, 0);
+  document.getElementById('rowsTotal').textContent = fmt(total);
+
+  renderAggregations(filtered);
+  updateTabStyle();
+}
+
+function renderAggregations(rows) {
+  const total = rows.reduce((s, r) => s + r.cost, 0) || 1;
+
+  // By Media
+  const byMedia = {};
+  for (const r of rows) byMedia[r.media] = (byMedia[r.media] || 0) + r.cost;
+  const mb = document.getElementById('byMediaBody');
+  mb.innerHTML = '';
+  Object.entries(byMedia).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => {
+    mb.innerHTML += `<tr class="border-b last:border-0"><td class="py-1">${k}</td><td class="text-right">${fmt(v)}</td><td class="text-right text-gray-500">${(v/total*100).toFixed(1)}%</td></tr>`;
+  });
+
+  // By Section
+  const bySec = {};
+  for (const r of rows) bySec[r.section] = (bySec[r.section] || 0) + r.cost;
+  const sb = document.getElementById('bySectionBody');
+  sb.innerHTML = '';
+  Object.entries(bySec).sort((a, b) => b[1] - a[1]).forEach(([k, v]) => {
+    sb.innerHTML += `<tr class="border-b last:border-0"><td class="py-1">${k}</td><td class="text-right">${fmt(v)}</td><td class="text-right text-gray-500">${(v/total*100).toFixed(1)}%</td></tr>`;
+  });
+}
+
+function updateTabStyle() {
+  document.querySelectorAll('.month-tab').forEach(btn => {
+    if (btn.dataset.month === activeMonth) {
+      btn.className = 'month-tab px-4 py-2 text-sm font-medium border-b-2 border-blue-600 text-blue-600';
+    } else {
+      btn.className = 'month-tab px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-800';
+    }
+  });
+}
+
+function mediaColor(m) {
+  switch (m) {
+    case 'Facebook': return 'bg-blue-100 text-blue-700';
+    case 'YouTube':  return 'bg-red-100 text-red-700';
+    case 'TikTok':   return 'bg-gray-900 text-white';
+    default:         return 'bg-gray-100 text-gray-600';
+  }
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;' }[c]));
+}
+
+async function handleFile(file) {
+  const status = document.getElementById('status');
+  status.textContent = 'กำลังอ่านไฟล์...';
+  status.className = 'mt-4 text-sm text-gray-600';
+  try {
+    const buf = await file.arrayBuffer();
+    const { sheetName, rows } = parseExcel(buf);
+    DATA = rows;
+    status.textContent = `อ่านสำเร็จ: Sheet "${sheetName}" — พบ ${rows.length} บรรทัด`;
+    status.className = 'mt-4 text-sm text-green-700';
+    document.getElementById('result').classList.remove('hidden');
+    renderMonthCards();
+    renderRows();
+  } catch (e) {
+    console.error(e);
+    status.textContent = 'อ่านไฟล์ไม่สำเร็จ: ' + e.message;
+    status.className = 'mt-4 text-sm text-red-700';
+  }
+}
+
+// Wire up upload
+const dropZone = document.getElementById('dropZone');
+const fileInput = document.getElementById('fileInput');
+dropZone.addEventListener('click', () => fileInput.click());
+fileInput.addEventListener('change', e => e.target.files[0] && handleFile(e.target.files[0]));
+['dragenter','dragover'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.add('dragover'); }));
+['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove('dragover'); }));
+dropZone.addEventListener('drop', e => { e.preventDefault(); e.dataTransfer.files[0] && handleFile(e.dataTransfer.files[0]); });
+
+document.querySelectorAll('.month-tab').forEach(btn => {
+  btn.addEventListener('click', () => { activeMonth = btn.dataset.month; renderRows(); });
+});
+updateTabStyle();
+</script>
+</body>
+</html>
