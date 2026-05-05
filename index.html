@@ -52,16 +52,10 @@
       <!-- Right column: filters + detail table + by-media -->
       <div class="lg:col-span-10 space-y-6">
 
-        <!-- Filters -->
-        <div class="bg-white rounded-lg shadow p-4 space-y-3">
-          <div class="flex flex-wrap items-center gap-3">
-            <span class="text-sm font-medium text-gray-700 w-20">เดือน:</span>
-            <div id="monthFilter" class="flex flex-wrap gap-1"></div>
-          </div>
-          <div class="flex flex-wrap items-center gap-3">
-            <span class="text-sm font-medium text-gray-700 w-20">หมวด:</span>
-            <div id="sectionFilter" class="flex flex-wrap gap-1"></div>
-          </div>
+        <!-- Month filter -->
+        <div class="bg-white rounded-lg shadow p-3 flex flex-wrap items-center gap-3">
+          <span class="text-sm font-medium text-gray-700">เดือน:</span>
+          <div id="monthFilter" class="flex flex-wrap gap-1"></div>
         </div>
 
         <!-- Detail table -->
@@ -316,40 +310,37 @@ function renderSectionCards() {
   const container = document.getElementById('sectionCards');
   container.innerHTML = '';
   const grandTotal = DATA.reduce((s, r) => s + r.cost, 0) || 1;
+
+  // "All" card to clear the filter
+  const allCard = document.createElement('button');
+  allCard.dataset.section = 'all';
+  allCard.className = 'section-card text-left bg-white rounded-lg shadow p-3 border-l-4 border-gray-300 hover:ring-2 hover:ring-blue-400 transition';
+  allCard.innerHTML = `
+    <div class="text-xs font-medium opacity-80">ทั้งหมด</div>
+    <div class="text-lg font-bold mt-1">${fmt(DATA.reduce((s, r) => s + r.cost, 0))}</div>
+    <div class="text-xs opacity-70 mt-0.5">100%</div>
+  `;
+  allCard.addEventListener('click', () => { activeSection = 'all'; renderRows(); });
+  container.appendChild(allCard);
+
   for (const sec of SECTIONS) {
     const total = DATA.filter(r => r.section === sec.name).reduce((s, r) => s + r.cost, 0);
     const pct = (total / grandTotal * 100).toFixed(1);
     const card = document.createElement('button');
-    card.className = `text-left bg-white rounded-lg shadow p-3 hover:ring-2 hover:ring-blue-400 transition ${sectionAccent(sec.name)}`;
     card.dataset.section = sec.name;
+    card.className = `section-card text-left bg-white rounded-lg shadow p-3 hover:ring-2 hover:ring-blue-400 transition ${sectionAccent(sec.name)}`;
     card.innerHTML = `
       <div class="text-xs font-medium opacity-80">${sec.name}</div>
       <div class="text-lg font-bold mt-1">${fmt(total)}</div>
       <div class="text-xs opacity-70 mt-0.5">${pct}%</div>
     `;
-    card.addEventListener('click', () => { activeSection = sec.name; renderRows(); });
+    // Toggle: click active card again → back to "all"
+    card.addEventListener('click', () => {
+      activeSection = (activeSection === sec.name) ? 'all' : sec.name;
+      renderRows();
+    });
     container.appendChild(card);
   }
-}
-
-function renderSectionFilter() {
-  const container = document.getElementById('sectionFilter');
-  container.innerHTML = '';
-  const all = document.createElement('button');
-  all.className = 'section-chip px-3 py-1.5 text-sm rounded-md border';
-  all.dataset.section = 'all';
-  all.textContent = 'ทั้งหมด';
-  container.appendChild(all);
-  for (const sec of SECTIONS) {
-    const btn = document.createElement('button');
-    btn.className = 'section-chip px-3 py-1.5 text-sm rounded-md border';
-    btn.dataset.section = sec.name;
-    btn.textContent = sec.name;
-    container.appendChild(btn);
-  }
-  container.querySelectorAll('.section-chip').forEach(btn => {
-    btn.addEventListener('click', () => { activeSection = btn.dataset.section; renderRows(); });
-  });
 }
 
 function renderRows() {
@@ -399,10 +390,11 @@ function updateFilterStyles() {
       ? 'month-tab px-3 py-1.5 text-sm rounded-md border bg-blue-600 text-white border-blue-600'
       : 'month-tab px-3 py-1.5 text-sm rounded-md border bg-white text-gray-700 border-gray-300 hover:bg-gray-100';
   });
-  document.querySelectorAll('.section-chip').forEach(btn => {
-    btn.className = btn.dataset.section === activeSection
-      ? 'section-chip px-3 py-1.5 text-sm rounded-md border bg-blue-600 text-white border-blue-600'
-      : 'section-chip px-3 py-1.5 text-sm rounded-md border bg-white text-gray-700 border-gray-300 hover:bg-gray-100';
+  document.querySelectorAll('.section-card').forEach(card => {
+    const isActive = card.dataset.section === activeSection;
+    card.classList.toggle('ring-2', isActive);
+    card.classList.toggle('ring-blue-500', isActive);
+    card.classList.toggle('bg-blue-50', isActive);
   });
 }
 
@@ -429,7 +421,7 @@ function resetState() {
   activeMonth = 'all';
   activeSection = 'all';
   sectionColorMap.clear();
-  ['monthCards','sectionCards','monthFilter','sectionFilter','rowsBody','byMediaBody'].forEach(id => {
+  ['monthCards','sectionCards','monthFilter','rowsBody','byMediaBody'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.innerHTML = '';
   });
@@ -456,7 +448,6 @@ async function handleFile(file) {
     renderMonthCards();
     renderMonthFilter();
     renderSectionCards();
-    renderSectionFilter();
     renderRows();
   } catch (e) {
     console.error(e);
@@ -475,8 +466,7 @@ fileInput.addEventListener('change', e => e.target.files[0] && handleFile(e.targ
 ['dragleave','drop'].forEach(ev => dropZone.addEventListener(ev, e => { e.preventDefault(); dropZone.classList.remove('dragover'); }));
 dropZone.addEventListener('drop', e => { e.preventDefault(); e.dataTransfer.files[0] && handleFile(e.dataTransfer.files[0]); });
 
-// Month tabs and section chips are wired up dynamically after each upload
-// (renderMonthFilter / renderSectionFilter)
+// Month tabs and section cards are wired up dynamically after each upload
 </script>
 </body>
 </html>
