@@ -68,8 +68,7 @@
             <table class="min-w-full text-sm">
               <thead class="bg-gray-100">
                 <tr>
-                  <th class="px-3 py-2 text-left">Media</th>
-                  <th class="px-3 py-2 text-left">หมวด</th>
+                  <th class="px-3 py-2 text-left">Media / หมวด</th>
                   <th class="px-3 py-2 text-left">Material</th>
                   <th class="px-3 py-2 text-left">Detail (Audience / Interest)</th>
                   <th class="px-3 py-2 text-left">Date</th>
@@ -79,7 +78,7 @@
               <tbody id="rowsBody"></tbody>
               <tfoot class="bg-gray-50 font-semibold">
                 <tr>
-                  <td colspan="5" class="px-3 py-2 text-right">รวม</td>
+                  <td colspan="4" class="px-3 py-2 text-right">รวม</td>
                   <td id="rowsTotal" class="px-3 py-2 text-right"></td>
                 </tr>
               </tfoot>
@@ -355,8 +354,12 @@ function renderRows() {
     const tr = document.createElement('tr');
     tr.className = 'border-b hover:bg-gray-50';
     tr.innerHTML = `
-      <td class="px-3 py-2 align-top whitespace-nowrap"><span class="inline-block px-2 py-0.5 rounded text-xs ${mediaColor(r.media)}">${r.media}</span></td>
-      <td class="px-3 py-2 align-top whitespace-nowrap"><span class="inline-block px-2 py-0.5 rounded text-xs ${sectionBadge(r.section)}">${r.section}</span></td>
+      <td class="px-3 py-2 align-top whitespace-nowrap">
+        <div class="flex flex-col gap-1 items-start">
+          <span class="inline-block px-2 py-0.5 rounded text-xs ${mediaColor(r.media)}">${r.media}</span>
+          <span class="inline-block px-2 py-0.5 rounded text-xs ${sectionBadge(r.section)}">${escapeHtml(r.section)}</span>
+        </div>
+      </td>
       <td class="px-3 py-2 align-top">${escapeHtml(r.material)}</td>
       <td class="px-3 py-2 align-top detail">${escapeHtml(r.detail)}</td>
       <td class="px-3 py-2 align-top whitespace-nowrap">${r.date}<div class="text-xs text-gray-400">${escapeHtml(r.period)}</div></td>
